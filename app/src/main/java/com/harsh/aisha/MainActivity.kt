@@ -1,7 +1,13 @@
 
 package com.harsh.aisha
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -27,14 +33,30 @@ private val Teal = Color(0xFF55E4D0)
 private val CardColor = Color(0xFF201A35)
 
 class MainActivity : ComponentActivity() {
+
     private var tts: TextToSpeech? = null
+    private var speechRecognizer: SpeechRecognizer? = null
+
+    private var speechStatus by mutableStateOf("Ready")
+    private var ttsReady = false
+
+    private var onRecognizedText: ((String) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         tts = TextToSpeech(this) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("hi", "IN")
+            runOnUiThread {
+                ttsReady = status == TextToSpeech.SUCCESS
+
+                if (ttsReady) {
+                    val result = tts?.setLanguage(Locale("hi", "IN"))
+                    if (result == TextToSpeech.LANG_MISSING_DATA ||
+                        result == TextToSpeech.LANG_NOT_SUPPORTED
+                    ) {
+                        speechStatus = "Hindi voice unavailable; check TTS settings"
+                    }
+                }
             }
         }
 
@@ -48,29 +70,190 @@ class MainActivity : ComponentActivity() {
                 )
             ) {
                 AishaApp(
-                    onSpeak = { message ->
-                        tts?.speak(
-                            message,
-                            TextToSpeech.QUEUE_FLUSH,
-                            null,
-                            "aisha_response"
-                        )
+                    speechStatus = speechStatus,
+                    onSpeak = { speakText(it) },
+                    onListen = { callback ->
+                        onRecognizedText = callback
+                        requestOrStartListening()
                     }
                 )
             }
         }
     }
 
+    private fun speakText(message: String) {
+        if (ttsReady) {
+            tts?.speak(
+                message,
+                TextToSpeech.QUEUE_FLUSH,
+                null,
+                "aisha_response"
+            )
+        } else {
+            speechStatus = "Text-to-Speech is not ready"
+        }
+    }
+
+    private fun requestOrStartListening() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            speechStatus = "Speech recognition service unavailable"
+            return
+        }
+
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            speechStatus = "Microphone permission required"
+            requestPermissions(
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                REQUEST_AUDIO_PERMISSION
+            )
+            return
+        }
+
+        startListening()
+    }
+
+    private fun startListening() {
+        try {
+            speechRecognizer?.destroy()
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
+
+            speechRecognizer?.setRecognitionListener(
+                object : RecognitionListener {
+
+                    override fun onReadyForSpeech(params: Bundle?) {
+                        speechStatus = "Listening... ab bolo"
+                    }
+
+                    override fun onBeginningOfSpeech() {
+                        speechStatus = "Listening to your voice..."
+                    }
+
+                    override fun onRmsChanged(rmsdB: Float) = Unit
+
+                    override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+                    override fun onEndOfSpeech() {
+                        speechStatus = "Processing speech..."
+                    }
+
+                    override fun onError(error: Int) {
+                        speechStatus = when (error) {
+                            SpeechRecognizer.ERROR_AUDIO ->
+                                "Audio error. Please try again."
+
+                            SpeechRecognizer.ERROR_CLIENT ->
+                                "Recognition stopped. Tap microphone to retry."
+
+                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                                "Microphone permission denied."
+
+                            SpeechRecognizer.ERROR_NETWORK,
+                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+                                "Network issue. Check connection and retry."
+
+                            SpeechRecognizer.ERROR_NO_MATCH,
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                                "No speech detected. Please try again."
+
+                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+                                "Recognition busy. Wait and retry."
+
+                            else -> "Voice recognition failed. Please retry."
+                        }
+                    }
+
+                    override fun onResults(results: Bundle?) {
+                        val matches = results?.getStringArrayList(
+                            SpeechRecognizer.RESULTS_RECOGNITION
+                        )
+
+                        val spokenText = matches?.firstOrNull()?.trim()
+
+                        if (!spokenText.isNullOrBlank()) {
+                            speechStatus = "Speech recognized successfully"
+                            onRecognizedText?.invoke(spokenText)
+                        } else {
+                            speechStatus = "No speech recognized. Try again."
+                        }
+                    }
+
+                    override fun onPartialResults(partialResults: Bundle?) = Unit
+
+                    override fun onEvent(eventType: Int, params: Bundle?) = Unit
+                }
+            )
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+                putExtra(
+                    RecognizerIntent.EXTRA_PROMPT,
+                    "Aisha se baat karne ke liye bolo"
+                )
+            }
+
+            speechStatus = "Starting microphone..."
+            speechRecognizer?.startListening(intent)
+
+        } catch (exception: Exception) {
+            speechStatus = "Could not start microphone. Please retry."
+        }
+    }
+
+    @Deprecated("Deprecated by Android, retained for compatibility")
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(
+            requestCode,
+            permissions,
+            grantResults
+        )
+
+        if (requestCode == REQUEST_AUDIO_PERMISSION) {
+            if (grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            ) {
+                startListening()
+            } else {
+                speechStatus = "Microphone permission denied"
+            }
+        }
+    }
+
     override fun onDestroy() {
+        speechRecognizer?.cancel()
+        speechRecognizer?.destroy()
+        speechRecognizer = null
+
         tts?.stop()
         tts?.shutdown()
         tts = null
+
         super.onDestroy()
+    }
+
+    companion object {
+        private const val REQUEST_AUDIO_PERMISSION = 2001
     }
 }
 
 @Composable
-private fun AishaApp(onSpeak: (String) -> Unit) {
+private fun AishaApp(
+    speechStatus: String,
+    onSpeak: (String) -> Unit,
+    onListen: (onResult: (String) -> Unit) -> Unit
+) {
     var selectedTab by remember { mutableStateOf("Home") }
     var selectedView by remember { mutableStateOf("Close-up") }
     var selectedModel by remember { mutableIntStateOf(1) }
@@ -160,14 +343,20 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("A", fontSize = 58.sp, color = Background)
+                                Text(
+                                    "A",
+                                    fontSize = 58.sp,
+                                    color = Background
+                                )
                             }
+
                             Text(
                                 "Hey! I'm Aisha",
                                 color = Color.White,
                                 fontSize = 23.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
+
                             Text(
                                 "Your day, your ideas, your companion.",
                                 color = Color.LightGray,
@@ -177,19 +366,23 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
                     }
 
                     SectionTitle("QUICK ACTIONS")
+
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         ActionCard("💬", "Chat", Modifier.weight(1f)) {
-                            reply = "Chat prototype ready hai. Abhi real AI connected nahi hai."
+                            reply = "Chat ready hai. Real AI abhi connect nahi hai."
                         }
+
                         ActionCard("🔔", "Reminders", Modifier.weight(1f)) {
-                            reply = "Reminder screen abhi prototype hai; alarms set nahi hote."
+                            reply = "Reminder scheduling abhi implement nahi hui hai."
                         }
+
                         ActionCard("🧠", "Memory", Modifier.weight(1f)) {
                             selectedTab = "Memory"
                         }
                     }
 
                     SectionTitle("TALK TO AISHA")
+
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = CardColor
@@ -201,26 +394,71 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             Text(reply, color = Color.White)
+
                             OutlinedTextField(
                                 value = message,
                                 onValueChange = { message = it },
                                 modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Type a message") },
-                                singleLine = true
+                                label = { Text("Type or use microphone") },
+                                singleLine = false,
+                                maxLines = 4
                             )
+
                             Button(
                                 onClick = {
-                                    reply = if (message.isBlank()) {
-                                        "Namaste! Main Aisha hoon."
-                                    } else {
-                                        "Tumne kaha: $message\n\nAbhi main prototype hoon. Real AI reply ke liye AI provider connect karna baaki hai."
+                                    onListen { recognized ->
+                                        message = recognized
                                     }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("🎙 Speak to Aisha")
+                            }
+
+                            Text(
+                                speechStatus,
+                                color = Teal,
+                                fontSize = 12.sp
+                            )
+
+                            Button(
+                                onClick = {
+                                    val input = message.trim()
+
+                                    reply = when {
+                                        input.isBlank() ->
+                                            "Namaste! Main Aisha hoon."
+
+                                        input.contains(
+                                            "hello",
+                                            ignoreCase = true
+                                        ) ||
+                                        input.contains(
+                                            "namaste",
+                                            ignoreCase = true
+                                        ) ||
+                                        input.contains(
+                                            "नमस्ते"
+                                        ) ->
+                                            "Namaste! 😊 Main Aisha hoon. Batao, main tumhari kya help kar sakti hoon?"
+
+                                        input.contains(
+                                            "your name",
+                                            ignoreCase = true
+                                        ) ||
+                                        input.contains("tumhara naam") ->
+                                            "Mera naam Aisha hai!"
+
+                                        else ->
+                                            "Maine suna: $input. Abhi mera real AI brain connect nahi hua hai, isliye main iska intelligent answer abhi nahi de sakti."
+                                    }
+
                                     onSpeak(reply)
                                     message = ""
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text("Send & Speak  •  आवाज़ सुनें")
+                                Text("Send & Speak • आवाज़ सुनें")
                             }
                         }
                     }
@@ -228,11 +466,9 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
 
                 "Avatar" -> {
                     SectionTitle("AVATAR STUDIO")
-                    Text(
-                        "Choose a model",
-                        color = Color.White,
-                        fontSize = 17.sp
-                    )
+
+                    Text("Choose a model", color = Color.White, fontSize = 17.sp)
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         (1..5).forEach { number ->
                             FilterChip(
@@ -242,6 +478,7 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
                             )
                         }
                     }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -249,13 +486,11 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
                             .background(CardColor, RoundedCornerShape(24.dp)),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            "A$selectedModel",
-                            fontSize = 76.sp,
-                            color = Purple
-                        )
+                        Text("A$selectedModel", fontSize = 76.sp, color = Purple)
                     }
+
                     SectionTitle("CAMERA VIEW")
+
                     listOf("Close-up", "Half body", "Full body").forEach { view ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(
@@ -265,7 +500,9 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
                             Text(view, color = Color.White)
                         }
                     }
+
                     SectionTitle("OUTFIT")
+
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("Casual", "Traditional", "Smart", "Comfy")
                             .forEach { outfit ->
@@ -276,12 +513,14 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
                                 )
                             }
                     }
+
                     Text(
                         "Selected: Model $selectedModel • $selectedView • $selectedOutfit",
                         color = Teal
                     )
+
                     Text(
-                        "Note: Models, camera views and outfits are UI previews only. Real 3D assets are not connected yet.",
+                        "Models, camera views and outfits are UI previews only. Real 3D assets are not connected.",
                         color = Color.LightGray,
                         fontSize = 12.sp
                     )
@@ -289,34 +528,41 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
 
                 "Memory" -> {
                     SectionTitle("MY MEMORY")
+
                     InfoCard(
                         "Personal notes",
                         "Persistent memory storage is not connected yet."
                     )
+
                     InfoCard(
                         "Reminders",
-                        "Alarm scheduling will be added in a later milestone."
+                        "Alarm scheduling will be added in a later phase."
                     )
+
                     InfoCard(
                         "Privacy",
-                        "Camera, microphone and background wake-word features are not active."
+                        "The microphone is used when you tap Speak. Background wake-word detection is not active."
                     )
                 }
 
                 "Settings" -> {
                     SectionTitle("SETTINGS")
+
                     InfoCard(
                         "Voice",
-                        "The device TextToSpeech engine is used for spoken test responses."
+                        "Uses the Android speech recognition service and device Text-to-Speech engine."
                     )
+
                     InfoCard(
                         "AI Provider",
-                        "No external AI API is connected."
+                        "No external AI API is connected yet."
                     )
+
                     InfoCard(
                         "Wake word",
                         "Always-listening wake-word detection is not implemented."
                     )
+
                     InfoCard(
                         "Phone controls",
                         "Phone automation and app integrations are not enabled."
@@ -325,7 +571,7 @@ private fun AishaApp(onSpeak: (String) -> Unit) {
             }
 
             Text(
-                "AISHA • EARLY PROTOTYPE",
+                "AISHA • VOICE PHASE",
                 color = Color.Gray,
                 fontSize = 10.sp,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -382,8 +628,16 @@ private fun InfoCard(title: String, description: String) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold)
-            Text(description, color = Color.LightGray, fontSize = 13.sp)
+            Text(
+                title,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                description,
+                color = Color.LightGray,
+                fontSize = 13.sp
+            )
         }
     }
 }
