@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,11 +39,9 @@ class MainActivity : ComponentActivity() {
 
     private var tts: TextToSpeech? = null
     private var speechRecognizer: SpeechRecognizer? = null
-
     private var speechStatus by mutableStateOf("Ready")
     private var ttsReady = false
     private var onRecognizedText: ((String) -> Unit)? = null
-
     private var requestMicrophonePermission: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,36 +50,27 @@ class MainActivity : ComponentActivity() {
         tts = TextToSpeech(this) { status ->
             runOnUiThread {
                 ttsReady = status == TextToSpeech.SUCCESS
-
                 if (ttsReady) {
                     val result = tts?.setLanguage(Locale("hi", "IN"))
-
                     if (result == TextToSpeech.LANG_MISSING_DATA ||
                         result == TextToSpeech.LANG_NOT_SUPPORTED
                     ) {
-                        speechStatus =
-                            "Hindi voice unavailable; check TTS settings"
+                        speechStatus = "Hindi voice unavailable; check TTS settings"
                     }
                 }
             }
         }
 
         setContent {
-            val microphonePermissionLauncher =
-                rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.RequestPermission()
-                ) { granted ->
-                    if (granted) {
-                        startListening()
-                    } else {
-                        speechStatus = "Microphone permission denied"
-                    }
-                }
+            val permissionLauncher = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { granted ->
+                if (granted) startListening()
+                else speechStatus = "Microphone permission denied"
+            }
 
             requestMicrophonePermission = {
-                microphonePermissionLauncher.launch(
-                    Manifest.permission.RECORD_AUDIO
-                )
+                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
             }
 
             MaterialTheme(
@@ -105,12 +95,7 @@ class MainActivity : ComponentActivity() {
 
     private fun speakText(message: String) {
         if (ttsReady) {
-            tts?.speak(
-                message,
-                TextToSpeech.QUEUE_FLUSH,
-                null,
-                "aisha_response"
-            )
+            tts?.speak(message, TextToSpeech.QUEUE_FLUSH, null, "aisha_response")
         } else {
             speechStatus = "Text-to-Speech is not ready"
         }
@@ -146,72 +131,59 @@ class MainActivity : ComponentActivity() {
             speechRecognizer?.destroy()
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
-            speechRecognizer?.setRecognitionListener(
-                object : RecognitionListener {
-
-                    override fun onReadyForSpeech(params: Bundle?) {
-                        speechStatus = "Listening... ab bolo"
-                    }
-
-                    override fun onBeginningOfSpeech() {
-                        speechStatus = "Listening to your voice..."
-                    }
-
-                    override fun onRmsChanged(rmsdB: Float) = Unit
-
-                    override fun onBufferReceived(buffer: ByteArray?) = Unit
-
-                    override fun onEndOfSpeech() {
-                        speechStatus = "Processing speech..."
-                    }
-
-                    override fun onError(error: Int) {
-                        speechStatus = when (error) {
-                            SpeechRecognizer.ERROR_AUDIO ->
-                                "Audio error. Please try again."
-
-                            SpeechRecognizer.ERROR_CLIENT ->
-                                "Recognition stopped. Tap microphone to retry."
-
-                            SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
-                                "Microphone permission denied."
-
-                            SpeechRecognizer.ERROR_NETWORK,
-                            SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
-                                "Network issue. Check connection and retry."
-
-                            SpeechRecognizer.ERROR_NO_MATCH,
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
-                                "No speech detected. Please try again."
-
-                            SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
-                                "Recognition busy. Wait and retry."
-
-                            else ->
-                                "Voice recognition failed. Please retry."
-                        }
-                    }
-
-                    override fun onResults(results: Bundle?) {
-                        val matches = results?.getStringArrayList(
-                            SpeechRecognizer.RESULTS_RECOGNITION
-                        )
-
-                        val spokenText = matches?.firstOrNull()?.trim()
-
-                        if (!spokenText.isNullOrBlank()) {
-                            speechStatus = "Speech recognized successfully"
-                            onRecognizedText?.invoke(spokenText)
-                        } else {
-                            speechStatus = "No speech recognized. Try again."
-                        }
-                    }
-
-                    override fun onPartialResults(partialResults: Bundle?) = Unit
-
-                    override fun onEvent(eventType: Int, params: Bundle?) = Unit
+            speechRecognizer?.setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    speechStatus = "Listening... ab bolo"
                 }
-            )
+
+                override fun onBeginningOfSpeech() {
+                    speechStatus = "Listening to your voice..."
+                }
+
+                override fun onRmsChanged(rmsdB: Float) = Unit
+                override fun onBufferReceived(buffer: ByteArray?) = Unit
+
+                override fun onEndOfSpeech() {
+                    speechStatus = "Processing speech..."
+                }
+
+                override fun onError(error: Int) {
+                    speechStatus = when (error) {
+                        SpeechRecognizer.ERROR_AUDIO ->
+                            "Audio error. Please try again."
+                        SpeechRecognizer.ERROR_CLIENT ->
+                            "Recognition stopped. Tap microphone to retry."
+                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS ->
+                            "Microphone permission denied."
+                        SpeechRecognizer.ERROR_NETWORK,
+                        SpeechRecognizer.ERROR_NETWORK_TIMEOUT ->
+                            "Network issue. Check connection and retry."
+                        SpeechRecognizer.ERROR_NO_MATCH,
+                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT ->
+                            "No speech detected. Please try again."
+                        SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
+                            "Recognition busy. Wait and retry."
+                        else -> "Voice recognition failed. Please retry."
+                    }
+                }
+
+                override fun onResults(results: Bundle?) {
+                    val spokenText = results
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                        ?.trim()
+
+                    if (!spokenText.isNullOrBlank()) {
+                        speechStatus = "Speech recognized successfully"
+                        onRecognizedText?.invoke(spokenText)
+                    } else {
+                        speechStatus = "No speech recognized. Try again."
+                    }
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) = Unit
+                override fun onEvent(eventType: Int, params: Bundle?) = Unit
+            })
 
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(
@@ -230,7 +202,6 @@ class MainActivity : ComponentActivity() {
 
             speechStatus = "Starting microphone..."
             speechRecognizer?.startListening(intent)
-
         } catch (exception: Exception) {
             speechStatus = "Could not start microphone. Please retry."
         }
@@ -238,15 +209,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         requestMicrophonePermission = null
-
         speechRecognizer?.cancel()
         speechRecognizer?.destroy()
         speechRecognizer = null
-
         tts?.stop()
         tts?.shutdown()
         tts = null
-
         super.onDestroy()
     }
 }
@@ -303,13 +271,13 @@ private fun AishaApp(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 tabs.forEach { tab ->
                     FilterChip(
                         selected = selectedTab == tab,
                         onClick = { selectedTab = tab },
-                        label = { Text(tab, fontSize = 11.sp) }
+                        label = { Text(tab, fontSize = 10.sp) }
                     )
                 }
             }
@@ -322,10 +290,7 @@ private fun AishaApp(
                             .height(225.dp)
                             .background(
                                 Brush.verticalGradient(
-                                    listOf(
-                                        Color(0xFF30234F),
-                                        Color(0xFF152C3A)
-                                    )
+                                    listOf(Color(0xFF30234F), Color(0xFF152C3A))
                                 ),
                                 RoundedCornerShape(28.dp)
                             ),
@@ -339,23 +304,19 @@ private fun AishaApp(
                                 modifier = Modifier
                                     .size(104.dp)
                                     .background(
-                                        Brush.linearGradient(
-                                            listOf(Purple, Teal)
-                                        ),
+                                        Brush.linearGradient(listOf(Purple, Teal)),
                                         RoundedCornerShape(52.dp)
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text("A", fontSize = 58.sp, color = Background)
                             }
-
                             Text(
                                 "Hey! I'm Aisha",
                                 color = Color.White,
                                 fontSize = 23.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
-
                             Text(
                                 "Your day, your ideas, your companion.",
                                 color = Color.LightGray,
@@ -370,11 +331,9 @@ private fun AishaApp(
                         ActionCard("💬", "Chat", Modifier.weight(1f)) {
                             reply = "Chat ready hai. Real AI abhi connect nahi hai."
                         }
-
                         ActionCard("🔔", "Reminders", Modifier.weight(1f)) {
                             reply = "Reminder scheduling abhi implement nahi hui hai."
                         }
-
                         ActionCard("🧠", "Memory", Modifier.weight(1f)) {
                             selectedTab = "Memory"
                         }
@@ -383,9 +342,7 @@ private fun AishaApp(
                     SectionTitle("TALK TO AISHA")
 
                     Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = CardColor
-                        ),
+                        colors = CardDefaults.cardColors(containerColor = CardColor),
                         shape = RoundedCornerShape(20.dp)
                     ) {
                         Column(
@@ -404,51 +361,31 @@ private fun AishaApp(
 
                             Button(
                                 onClick = {
-                                    onListen { recognized ->
-                                        message = recognized
-                                    }
+                                    onListen { recognized -> message = recognized }
                                 },
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text("🎙 Speak to Aisha")
                             }
 
-                            Text(
-                                speechStatus,
-                                color = Teal,
-                                fontSize = 12.sp
-                            )
+                            Text(speechStatus, color = Teal, fontSize = 12.sp)
 
                             Button(
                                 onClick = {
                                     val input = message.trim()
-
                                     reply = when {
                                         input.isBlank() ->
                                             "Namaste! Main Aisha hoon."
-
-                                        input.contains(
-                                            "hello",
-                                            ignoreCase = true
-                                        ) ||
-                                        input.contains(
-                                            "namaste",
-                                            ignoreCase = true
-                                        ) ||
-                                        input.contains("नमस्ते") ->
+                                        input.contains("hello", true) ||
+                                            input.contains("namaste", true) ||
+                                            input.contains("नमस्ते") ->
                                             "Namaste! 😊 Main Aisha hoon. Batao, main tumhari kya help kar sakti hoon?"
-
-                                        input.contains(
-                                            "your name",
-                                            ignoreCase = true
-                                        ) ||
-                                        input.contains("tumhara naam") ->
+                                        input.contains("your name", true) ||
+                                            input.contains("tumhara naam", true) ->
                                             "Mera naam Aisha hai!"
-
                                         else ->
                                             "Maine suna: $input. Abhi mera real AI brain connect nahi hua hai, isliye main iska intelligent answer abhi nahi de sakti."
                                     }
-
                                     onSpeak(reply)
                                     message = ""
                                 },
@@ -464,12 +401,12 @@ private fun AishaApp(
                     SectionTitle("AVATAR STUDIO")
                     Text("Choose a model", color = Color.White, fontSize = 17.sp)
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         (1..5).forEach { number ->
                             FilterChip(
                                 selected = selectedModel == number,
                                 onClick = { selectedModel = number },
-                                label = { Text("Model $number") }
+                                label = { Text("Model $number", fontSize = 10.sp) }
                             )
                         }
                     }
@@ -485,7 +422,6 @@ private fun AishaApp(
                     }
 
                     SectionTitle("CAMERA VIEW")
-
                     listOf("Close-up", "Half body", "Full body").forEach { view ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(
@@ -497,23 +433,20 @@ private fun AishaApp(
                     }
 
                     SectionTitle("OUTFIT")
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("Casual", "Traditional", "Smart", "Comfy")
-                            .forEach { outfit ->
-                                FilterChip(
-                                    selected = selectedOutfit == outfit,
-                                    onClick = { selectedOutfit = outfit },
-                                    label = { Text(outfit) }
-                                )
-                            }
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        listOf("Casual", "Traditional", "Smart", "Comfy").forEach { outfit ->
+                            FilterChip(
+                                selected = selectedOutfit == outfit,
+                                onClick = { selectedOutfit = outfit },
+                                label = { Text(outfit, fontSize = 10.sp) }
+                            )
+                        }
                     }
 
                     Text(
                         "Selected: Model $selectedModel • $selectedView • $selectedOutfit",
                         color = Teal
                     )
-
                     Text(
                         "Models, views and outfits are UI previews only. Real 3D assets are not connected.",
                         color = Color.LightGray,
@@ -522,13 +455,7 @@ private fun AishaApp(
                 }
 
                 "Memory" -> {
-                    SectionTitle("MY MEMORY")
-                    InfoCard("Personal notes", "Persistent memory storage is not connected yet.")
-                    InfoCard("Reminders", "Alarm scheduling will be added in a later phase.")
-                    InfoCard(
-                        "Privacy",
-                        "Microphone is used when you tap Speak. Background wake-word detection is not active."
-                    )
+                    MemoryScreen()
                 }
 
                 "Settings" -> {
@@ -538,18 +465,176 @@ private fun AishaApp(
                         "Uses Android speech recognition and the device Text-to-Speech engine."
                     )
                     InfoCard("AI Provider", "No external AI API is connected yet.")
-                    InfoCard("Wake word", "Always-listening wake-word detection is not implemented.")
-                    InfoCard("Phone controls", "Phone automation and app integrations are not enabled.")
+                    InfoCard(
+                        "Wake word",
+                        "Always-listening wake-word detection is not implemented."
+                    )
+                    InfoCard(
+                        "Phone controls",
+                        "Phone automation and app integrations are not enabled."
+                    )
+                    InfoCard(
+                        "Local memory privacy",
+                        "Notes are stored locally in this app's private SharedPreferences. They are not encrypted by this feature."
+                    )
                 }
             }
 
             Text(
-                "AISHA • VOICE PHASE",
+                "AISHA • PERSONAL ASSISTANT",
                 color = Color.Gray,
                 fontSize = 10.sp,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )
         }
+    }
+}
+
+@Composable
+private fun MemoryScreen() {
+    val context = LocalContext.current
+    val memoryStore = remember(context) { MemoryStore(context) }
+
+    var draft by remember { mutableStateOf("") }
+    var notes by remember { mutableStateOf(memoryStore.getAll()) }
+    var status by remember { mutableStateOf("") }
+    var showClearConfirmation by remember { mutableStateOf(false) }
+
+    fun refreshNotes() {
+        notes = memoryStore.getAll()
+    }
+
+    SectionTitle("MY MEMORY")
+
+    Text(
+        "Save useful notes for Aisha to keep on this device.",
+        color = Color.LightGray,
+        fontSize = 13.sp
+    )
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = CardColor),
+        shape = RoundedCornerShape(20.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("What should Aisha remember?") },
+                placeholder = { Text("Example: My exam starts on Monday") },
+                minLines = 2,
+                maxLines = 4
+            )
+
+            Button(
+                onClick = {
+                    if (memoryStore.add(draft)) {
+                        draft = ""
+                        refreshNotes()
+                        status = "Memory saved on this device."
+                    } else {
+                        status = "Please type a note first."
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("💾 Save Memory")
+            }
+
+            if (status.isNotBlank()) {
+                Text(status, color = Teal, fontSize = 12.sp)
+            }
+        }
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "SAVED MEMORIES (${notes.size})",
+            color = Teal,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        TextButton(
+            onClick = { showClearConfirmation = true },
+            enabled = notes.isNotEmpty()
+        ) {
+            Text("Clear all")
+        }
+    }
+
+    if (notes.isEmpty()) {
+        InfoCard(
+            "No memories yet",
+            "Write a note above and tap Save Memory. Your saved notes will appear here."
+        )
+    } else {
+        notes.forEach { note ->
+            Card(
+                colors = CardDefaults.cardColors(containerColor = CardColor),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(note, color = Color.White, fontSize = 14.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(
+                            onClick = {
+                                memoryStore.delete(note)
+                                refreshNotes()
+                                status = "Memory deleted."
+                            }
+                        ) {
+                            Text("🗑 Delete")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    InfoCard(
+        "Privacy",
+        "Memories stay in this app's local storage. Clearing app data or uninstalling the app may remove them. This feature does not sync to a server."
+    )
+
+    if (showClearConfirmation) {
+        AlertDialog(
+            onDismissRequest = { showClearConfirmation = false },
+            title = { Text("Clear all memories?") },
+            text = { Text("This will permanently remove every saved note from this app.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        memoryStore.clearAll()
+                        refreshNotes()
+                        status = "All memories cleared."
+                        showClearConfirmation = false
+                    }
+                ) {
+                    Text("Clear all")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearConfirmation = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
