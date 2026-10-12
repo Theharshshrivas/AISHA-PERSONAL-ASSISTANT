@@ -202,7 +202,7 @@ class MainActivity : ComponentActivity() {
 
             speechStatus = "Starting microphone..."
             speechRecognizer?.startListening(intent)
-        } catch (exception: Exception) {
+        } catch (_: Exception) {
             speechStatus = "Could not start microphone. Please retry."
         }
     }
@@ -234,7 +234,7 @@ private fun AishaApp(
         mutableStateOf("Namaste! Main Aisha hoon. Mujhe Hello bolo!")
     }
 
-    val tabs = listOf("Home", "Avatar", "Memory", "Settings")
+    val tabs = listOf("Home", "Reminders", "Avatar", "Memory", "Settings")
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -271,13 +271,13 @@ private fun AishaApp(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 tabs.forEach { tab ->
                     FilterChip(
                         selected = selectedTab == tab,
                         onClick = { selectedTab = tab },
-                        label = { Text(tab, fontSize = 10.sp) }
+                        label = { Text(tab, fontSize = 9.sp) }
                     )
                 }
             }
@@ -332,7 +332,7 @@ private fun AishaApp(
                             reply = "Chat ready hai. Real AI abhi connect nahi hai."
                         }
                         ActionCard("🔔", "Reminders", Modifier.weight(1f)) {
-                            reply = "Reminder scheduling abhi implement nahi hui hai."
+                            selectedTab = "Reminders"
                         }
                         ActionCard("🧠", "Memory", Modifier.weight(1f)) {
                             selectedTab = "Memory"
@@ -397,6 +397,10 @@ private fun AishaApp(
                     }
                 }
 
+                "Reminders" -> {
+                    ReminderScreen(onSpeak = onSpeak)
+                }
+
                 "Avatar" -> {
                     SectionTitle("AVATAR STUDIO")
                     Text("Choose a model", color = Color.White, fontSize = 17.sp)
@@ -454,9 +458,7 @@ private fun AishaApp(
                     )
                 }
 
-                "Memory" -> {
-                    MemoryScreen()
-                }
+                "Memory" -> MemoryScreen()
 
                 "Settings" -> {
                     SectionTitle("SETTINGS")
@@ -639,7 +641,7 @@ private fun MemoryScreen() {
 }
 
 @Composable
-private fun SectionTitle(title: String) {
+internal fun SectionTitle(title: String) {
     Text(
         title,
         color = Teal,
@@ -676,7 +678,7 @@ private fun ActionCard(
 }
 
 @Composable
-private fun InfoCard(title: String, description: String) {
+internal fun InfoCard(title: String, description: String) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = CardColor),
