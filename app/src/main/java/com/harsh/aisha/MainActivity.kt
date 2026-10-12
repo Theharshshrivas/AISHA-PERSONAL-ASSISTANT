@@ -11,6 +11,8 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -39,8 +41,9 @@ class MainActivity : ComponentActivity() {
 
     private var speechStatus by mutableStateOf("Ready")
     private var ttsReady = false
-
     private var onRecognizedText: ((String) -> Unit)? = null
+
+    private var requestMicrophonePermission: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,16 +54,35 @@ class MainActivity : ComponentActivity() {
 
                 if (ttsReady) {
                     val result = tts?.setLanguage(Locale("hi", "IN"))
+
                     if (result == TextToSpeech.LANG_MISSING_DATA ||
                         result == TextToSpeech.LANG_NOT_SUPPORTED
                     ) {
-                        speechStatus = "Hindi voice unavailable; check TTS settings"
+                        speechStatus =
+                            "Hindi voice unavailable; check TTS settings"
                     }
                 }
             }
         }
 
         setContent {
+            val microphonePermissionLauncher =
+                rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.RequestPermission()
+                ) { granted ->
+                    if (granted) {
+                        startListening()
+                    } else {
+                        speechStatus = "Microphone permission denied"
+                    }
+                }
+
+            requestMicrophonePermission = {
+                microphonePermissionLauncher.launch(
+                    Manifest.permission.RECORD_AUDIO
+                )
+            }
+
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     primary = Purple,
@@ -100,14 +122,11 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
         ) {
-            speechStatus = "Microphone permission required"
-            requestPermissions(
-                arrayOf(Manifest.permission.RECORD_AUDIO),
-                REQUEST_AUDIO_PERMISSION
-            )
+            speechStatus = "Requesting microphone permission..."
+            requestMicrophonePermission?.invoke()
             return
         }
 
@@ -115,7 +134,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startListening() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            speechStatus = "Microphone permission required"
+            return
+        }
+
         try {
+            speechRecognizer?.cancel()
             speechRecognizer?.destroy()
             speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
 
@@ -160,7 +187,8 @@ class MainActivity : ComponentActivity() {
                             SpeechRecognizer.ERROR_RECOGNIZER_BUSY ->
                                 "Recognition busy. Wait and retry."
 
-                            else -> "Voice recognition failed. Please retry."
+                            else ->
+                                "Voice recognition failed. Please retry."
                         }
                     }
 
@@ -208,30 +236,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Deprecated("Deprecated by Android, retained for compatibility")
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(
-            requestCode,
-            permissions,
-            grantResults
-        )
-
-        if (requestCode == REQUEST_AUDIO_PERMISSION) {
-            if (grantResults.isNotEmpty() &&
-                grantResults[0] == PackageManager.PERMISSION_GRANTED
-            ) {
-                startListening()
-            } else {
-                speechStatus = "Microphone permission denied"
-            }
-        }
-    }
-
     override fun onDestroy() {
+        requestMicrophonePermission = null
+
         speechRecognizer?.cancel()
         speechRecognizer?.destroy()
         speechRecognizer = null
@@ -241,10 +248,6 @@ class MainActivity : ComponentActivity() {
         tts = null
 
         super.onDestroy()
-    }
-
-    companion object {
-        private const val REQUEST_AUDIO_PERMISSION = 2001
     }
 }
 
@@ -343,11 +346,7 @@ private fun AishaApp(
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    "A",
-                                    fontSize = 58.sp,
-                                    color = Background
-                                )
+                                Text("A", fontSize = 58.sp, color = Background)
                             }
 
                             Text(
@@ -400,7 +399,6 @@ private fun AishaApp(
                                 onValueChange = { message = it },
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("Type or use microphone") },
-                                singleLine = false,
                                 maxLines = 4
                             )
 
@@ -437,9 +435,7 @@ private fun AishaApp(
                                             "namaste",
                                             ignoreCase = true
                                         ) ||
-                                        input.contains(
-                                            "नमस्ते"
-                                        ) ->
+                                        input.contains("नमस्ते") ->
                                             "Namaste! 😊 Main Aisha hoon. Batao, main tumhari kya help kar sakti hoon?"
 
                                         input.contains(
@@ -466,7 +462,6 @@ private fun AishaApp(
 
                 "Avatar" -> {
                     SectionTitle("AVATAR STUDIO")
-
                     Text("Choose a model", color = Color.White, fontSize = 17.sp)
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -520,7 +515,7 @@ private fun AishaApp(
                     )
 
                     Text(
-                        "Models, camera views and outfits are UI previews only. Real 3D assets are not connected.",
+                        "Models, views and outfits are UI previews only. Real 3D assets are not connected.",
                         color = Color.LightGray,
                         fontSize = 12.sp
                     )
@@ -528,45 +523,23 @@ private fun AishaApp(
 
                 "Memory" -> {
                     SectionTitle("MY MEMORY")
-
-                    InfoCard(
-                        "Personal notes",
-                        "Persistent memory storage is not connected yet."
-                    )
-
-                    InfoCard(
-                        "Reminders",
-                        "Alarm scheduling will be added in a later phase."
-                    )
-
+                    InfoCard("Personal notes", "Persistent memory storage is not connected yet.")
+                    InfoCard("Reminders", "Alarm scheduling will be added in a later phase.")
                     InfoCard(
                         "Privacy",
-                        "The microphone is used when you tap Speak. Background wake-word detection is not active."
+                        "Microphone is used when you tap Speak. Background wake-word detection is not active."
                     )
                 }
 
                 "Settings" -> {
                     SectionTitle("SETTINGS")
-
                     InfoCard(
                         "Voice",
-                        "Uses the Android speech recognition service and device Text-to-Speech engine."
+                        "Uses Android speech recognition and the device Text-to-Speech engine."
                     )
-
-                    InfoCard(
-                        "AI Provider",
-                        "No external AI API is connected yet."
-                    )
-
-                    InfoCard(
-                        "Wake word",
-                        "Always-listening wake-word detection is not implemented."
-                    )
-
-                    InfoCard(
-                        "Phone controls",
-                        "Phone automation and app integrations are not enabled."
-                    )
+                    InfoCard("AI Provider", "No external AI API is connected yet.")
+                    InfoCard("Wake word", "Always-listening wake-word detection is not implemented.")
+                    InfoCard("Phone controls", "Phone automation and app integrations are not enabled.")
                 }
             }
 
@@ -628,16 +601,8 @@ private fun InfoCard(title: String, description: String) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                title,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                description,
-                color = Color.LightGray,
-                fontSize = 13.sp
-            )
+            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold)
+            Text(description, color = Color.LightGray, fontSize = 13.sp)
         }
     }
 }
